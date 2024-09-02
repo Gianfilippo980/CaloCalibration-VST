@@ -1,5 +1,5 @@
 """ Mu2E Calorimeter Calibration
-    Track event display version 2.2
+    Track event display version 3.0
     by Giacinto Boccia
     2024-09-03
     """
@@ -89,7 +89,7 @@ class Disk:
         #cry_pos is a matrix where each row is the [x,y] position of a crystal
         self.fit_arr : list[Disk.Fit] =[]
         self.centroid : np.array[np.double, np.double] = np.zeros(shape = 2, dtype = np.double)
-        
+        self.id = id
         #prepare the crystals
         self.cry_arr : list[Crystal] = []
         if id == 0:
@@ -149,7 +149,7 @@ class Disk:
         
     def draw_q(self, fits : bool = True, plot_name : str = False) -> None:
         #Use this method to draw the Q values of an event, if "fits" it will display all the applied fits
-        ev_name : str = plot_name or "Run " + str(self.run_num) + " Event " + str(self.ev_num)
+        ev_name : str = plot_name or "Run " + str(self.run_num) + " Disk " + str(self.id) + " - Event " + str(self.ev_num)
         self.canvas = R.TCanvas(ev_name, ev_name, 1000, 1000)
         self.__draw_q(ev_name)
         self.__draw_circles()
@@ -190,7 +190,7 @@ class Disk:
     def draw_tdif(self, plot_name : str = False) -> None:
         #Use this method to draw the mean time difference of the resposnses of each crystal 
         # (also over multiple events)
-        name : str = plot_name or "Run " + str(self.run_num) + " Event " + str(self.ev_num) + " time differences"
+        name : str = plot_name or"Disk " + str(self.id) + " - Run " + str(self.run_num) + " Event " + str(self.ev_num) + " time differences"
         self.canvas = R.TCanvas(name, name, 1000, 1000)
         self.crys_hist = R.TH2Poly()
         for crystal in self.cry_arr:
@@ -211,7 +211,7 @@ class Disk:
     def draw_hitcount(self) -> None:
         #use this method to draw a plot where each box represents the number of hits collected by each crystal 
         #(typically afther loading mutiple events)
-        name : str = "Number of Hits"
+        name : str = "Disk " + str(self.id) + " - Number of Hits"
         self.canvas = R.TCanvas(name, name, 1000, 1000)
         self.crys_hist = R.TH2Poly()
         for crystal in self.cry_arr:
@@ -299,7 +299,7 @@ class Disk:
             #(the one Event.Event_fit object on wich you call the method), if you are looking at a 
             #TCanvas with all the fits onverlayed over the calorimeter activation, 
             #or if you don't want to draw fits at all look at Event.event_draw()
-            fit_name = "Run " + str(self.disk.run_num) + "Event " + str(self.disk.ev_num)
+            fit_name = "Run " + str(self.disk.run_num) + "Disk " + str(self.disk.id) + " - Event " + str(self.disk.ev_num)
             self.canvas = R.TCanvas(fit_name, fit_name, 1000, 1000)
             self.disk.__draw_q(fit_name)
             self.__fit_draw(fit_name)
@@ -321,6 +321,48 @@ class Disk:
             else:
                 print("You are drawing a fit that does not exist! Try linear_fit() [or other] before.")     
 
+class Calorimeter:
+    
+    def __init__(self) -> None:
+        self.dis_arr = (Disk(0), Disk(1))
+        
+    def load_event(self, event : R.Event, event_number : int) -> int:
+        #Loads the event, or each hit iCry decides wich of the two disks should contain it
+        n_crys : int = self.dis_arr[0].cry_pos.shape[0] + self.dis_arr[1].cry_pos.shape[0]
+        hits_for_crystal : np.array[int] = np.zeros(shape = n_crys, dtype = int)
+        n_hits : int = event.nHits
+        x_arr = np.frombuffer(event.Xval)
+        y_arr = np.frombuffer(event.Yval)
+        t_arr = np.frombuffer(event.templTime)
+        q_arr = np.frombuffer(event.Qval)
+        cry_num_arr = np.frombuffer(event.iCry, dtype= np.int32)
+        
+        #The centroid of the event is defined as the weighted average of the hit positions
+        if n_hits > 0:
+            self.centroid = np.array([np.average(x_arr, weights= q_arr), np.average(y_arr, weights= q_arr)], dtype= np.double)
+        
+        #Place hits in crystals
+        for hit_num in range(n_hits):
+            #Loop over hits
+            curr_hit = Hit(hit_num, x_arr[hit_num], y_arr[hit_num], t_arr[hit_num], q_arr[hit_num])
+            if self.cry_arr[cry_num_arr[hit_num]].test_new_hit(curr_hit):
+                hits_for_crystal[cry_num_arr[hit_num]] += 1
+            else:
+                print("Error! Hit doesn't correspond to a crystal!")
+                
+        #Check that each crystal has an even number of hits
+        for hit_num, n in enumerate(hits_for_crystal):
+            if n % 2 != 0:
+                #print("Warning! On event ", self.ev_num, " crystal ", i, " has ", n, " hits.")
+                #If one of the crystals doesn't have an even number of hits, the last timing is deleted (this only affects the time difference disply)
+                self.cry_arr[hit_num].t_arr = self.cry_arr[hit_num].t_arr[ :-1]
+                    
+        return n_hits
+            
+    def empty(self) -> None:
+        self.dis_arr[0].empty()
+        self.dis_arr[1].empty()
+    
 calo = Disk(0)
 
 def single_event_q(tree : R.TTree,
