@@ -149,7 +149,7 @@ class Disk:
         
     def draw_q(self, fits : bool = True, plot_name : str = False) -> None:
         #Use this method to draw the Q values of an event, if "fits" it will display all the applied fits
-        ev_name : str = plot_name or "Run " + str(self.run_num) + " Disk " + str(self.id) + " - Event " + str(self.ev_num)
+        ev_name : str = plot_name or "Run " + str(self.run_num) + " Disk " + str(self.id) + " - Disk " + str(self.id) + " - Event " + str(self.ev_num)
         self.canvas = R.TCanvas(ev_name, ev_name, 1000, 1000)
         self.__draw_q(ev_name)
         self.__draw_circles()
