@@ -230,7 +230,8 @@ class Disk:
         self.__draw_circles()
         
     def empty(self) -> None:
-        #Use this metod to empty the disk, deleting all the loaded hits, fits, etc. while keeping the crystals
+        #Use this metod to empty the disk, deleting all the loaded hits, fits, etc. while keeping 
+        # the crystals
         self.fit_arr : list[Disk.Fit] =[]
         self.ev_num : int = 0
         self.run_num : int = 0
@@ -240,8 +241,8 @@ class Disk:
             crystal.empty()
         
     class Fit:
-        #Once you decide to fit an event, you instantiate this nested class, if new fit methods are developed, 
-        #they should be placed in this class. To use them, call event_fit() on the Event, 
+        #Once you decide to fit an event, you instantiate this nested class, if new fit methods are  
+        #developed, they should be placed in this class. To use them, call event_fit() on the Event, 
         #it returns an Event_fit object, if you vant to fit the same event vith different parametrs
         #call event_fit() more than once
         def __init__(self, disk : 'Disk') -> None:
@@ -274,7 +275,8 @@ class Disk:
                     self.fit = R.TF1("Linear", "pol1")
                     self.graph.Fit("Linear")
                     self.chi_sqare = self.fit.GetChisquare()
-                    #Set the color here, so that different fits (differnet methods) can have different colors
+                    #Set the color here, so that different fits (differnet methods) can have 
+                    # different colors
                     self.fit.SetLineColor(4)
                     self.fit.SetLineWidth(2)
                 else:
@@ -285,8 +287,8 @@ class Disk:
             return n_sel
 
         def __is_vertical(self, x_arr : array, y_arr : array) -> bool:
-            #This method is called when fitting (it is suposed to be shared between differnet fit tecniques),
-            #if you want to access its result just read Event.Evnet_fit.vertical
+            #This method is called when fitting (it is suposed to be shared between differnet fit
+            # tecniques), if you want to access its result just read Event.Evnet_fit.vertical
             min_x = np.min(x_arr)
             max_x = np.max(x_arr)
             dx = max_x - min_x
@@ -322,40 +324,63 @@ class Disk:
                 print("You are drawing a fit that does not exist! Try linear_fit() [or other] before.")     
 
 class Calorimeter:
+    #The Calorimeter holds two Disks
     
     def __init__(self) -> None:
         self.dis_arr = (Disk(0), Disk(1))
         
     def load_event(self, event : R.Event, event_number : int) -> int:
         #Loads the event, or each hit iCry decides wich of the two disks should contain it
-        n_crys : int = self.dis_arr[0].cry_pos.shape[0] + self.dis_arr[1].cry_pos.shape[0]
-        hits_for_crystal : np.array[int] = np.zeros(shape = n_crys, dtype = int)
+        hits_for_crystal : np.array[int] = np.zeros(shape = (self.dis_arr[0].n_crystals,2), 
+                                                    dtype = int)
         n_hits : int = event.nHits
         x_arr = np.frombuffer(event.Xval)
         y_arr = np.frombuffer(event.Yval)
         t_arr = np.frombuffer(event.templTime)
         q_arr = np.frombuffer(event.Qval)
         cry_num_arr = np.frombuffer(event.iCry, dtype= np.int32)
-        
-        #The centroid of the event is defined as the weighted average of the hit positions
-        if n_hits > 0:
-            self.centroid = np.array([np.average(x_arr, weights= q_arr), np.average(y_arr, weights= q_arr)], dtype= np.double)
+        disk_filter_arr = np.zeros((n_hits, 2), dtype= bool)
+        #disk_filter_arr will contain [True, False] for each hit, flagging it to one of the
+        #two calorimeter disks
         
         #Place hits in crystals
         for hit_num in range(n_hits):
             #Loop over hits
             curr_hit = Hit(hit_num, x_arr[hit_num], y_arr[hit_num], t_arr[hit_num], q_arr[hit_num])
-            if self.cry_arr[cry_num_arr[hit_num]].test_new_hit(curr_hit):
-                hits_for_crystal[cry_num_arr[hit_num]] += 1
+            if cry_num_arr[hit_num] < 674:
+                #Disk 0
+                disk_filter_arr[hit_num, 0] = True
+                if self.dis_arr[0].cry_arr[cry_num_arr[hit_num]].test_new_hit(curr_hit):
+                    hits_for_crystal[cry_num_arr[hit_num, 0]] += 1
+                else:
+                    print("Error! Hit ", hit_num, " doesn't correspond to a crystal in disk 0!")
             else:
-                print("Error! Hit doesn't correspond to a crystal!")
+                #Disk 1
+                disk_filter_arr[hit_num, 1] = True
+                if self.dis_arr[0].cry_arr[cry_num_arr[hit_num % 674]].test_new_hit(curr_hit):
+                    hits_for_crystal[cry_num_arr[hit_num, 1]] += 1
+                else:
+                    print("Error! Hit ", hit_num, " doesn't correspond to a crystal in disk 1!")
+        
+        #The centroid of the event is defined as the weighted average of the hit positions            
+        tot_hits = np.sum(hits_for_crystal, axis= 0)
+        for i_disk, disk in enumerate(self.dis_arr):
+            if tot_hits[i_disk] != 0:
+                disk.centroid = np.array([np.average(x_arr[disk_filter_arr[ : , i_disk]], 
+                                                     weights= q_arr[disk_filter_arr[ : , i_disk]]), 
+                                          np.average(y_arr[disk_filter_arr[ : , i_disk]], 
+                                                     weights= q_arr[disk_filter_arr[ : , i_disk]])])
                 
         #Check that each crystal has an even number of hits
-        for hit_num, n in enumerate(hits_for_crystal):
-            if n % 2 != 0:
-                #print("Warning! On event ", self.ev_num, " crystal ", i, " has ", n, " hits.")
-                #If one of the crystals doesn't have an even number of hits, the last timing is deleted (this only affects the time difference disply)
-                self.cry_arr[hit_num].t_arr = self.cry_arr[hit_num].t_arr[ :-1]
+        for cry_num, hits in enumerate(hits_for_crystal):
+            if hits[0] % 2 != 0:
+                #If one of the crystals doesn't have an even number of hits, 
+                # the last timing is deleted (this only affects the time difference disply)
+                self.dis_arr[0].cry_arr[cry_num].t_arr = self.dis_arr[0].cry_arr[cry_num].t_arr[ :-1]
+            if hits[1] % 2 != 0:
+                #If one of the crystals doesn't have an even number of hits, 
+                # the last timing is deleted (this only affects the time difference disply)
+                self.dis_arr[1].cry_arr[cry_num].t_arr = self.dis_arr[1].cry_arr[cry_num].t_arr[ :-1]
                     
         return n_hits
             
@@ -455,7 +480,10 @@ if __name__ == '__main__':
         run_n : int = 0
         ev_n :int = 0
         while entry_num < tree.GetEntries():
-            run_n, ev_n = single_event_q(tree, run_n, ev_n, q_min= TRESHOLD, hits_min= HITS_MIN, chi_max= CHI_MAX)
+            run_n, ev_n = single_event_q(tree, run_n, ev_n, 
+                                         q_min= TRESHOLD, 
+                                         hits_min= HITS_MIN, 
+                                         chi_max= CHI_MAX)
             input("Press any key for T Differences")
             signle_event_td(tree, run_n, ev_n)
             input("Press any key for next")     
